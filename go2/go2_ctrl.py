@@ -72,21 +72,55 @@ def get_rsl_flat_policy(cfg):
     ckpt_path = get_checkpoint_path(log_path=os.path.abspath("ckpts"), 
                                     run_dir=agent_cfg["load_run"], 
                                     checkpoint=agent_cfg["load_checkpoint"])
-    ppo_runner = OnPolicyRunner(env, agent_cfg, log_dir=None, device=agent_cfg["device"])
-    ppo_runner.load(ckpt_path)
-    policy = ppo_runner.get_inference_policy(device=agent_cfg["device"])
-    return env, policy
+    if "obs_groups" not in agent_cfg:
+        base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+
+        obs_manager = getattr(base_env, "observation_manager", None)
+        if obs_manager is not None:
+            if hasattr(obs_manager, "groups"):
+                obs_keys = list(obs_manager.groups.keys())
+            elif hasattr(obs_manager, "get_group_names"):
+                obs_keys = list(obs_manager.get_group_names())
+            else:
+                obs_keys = ["policy"]
+        else:
+            obs_keys = ["policy"]
+
+        agent_cfg["obs_groups"] = {"policy": obs_keys}
 
 def get_rsl_rough_policy(cfg):
+    # 创建环境并包装
     env = gym.make("Isaac-Velocity-Rough-Unitree-Go2-v0", cfg=cfg)
     env = RslRlVecEnvWrapper(env)
 
-    # Low level control: rsl control policy
+    # 加载强化学习配置
     agent_cfg: RslRlOnPolicyRunnerCfg = unitree_go2_rough_cfg
-    ckpt_path = get_checkpoint_path(log_path=os.path.abspath("ckpts"), 
-                                    run_dir=agent_cfg["load_run"], 
-                                    checkpoint=agent_cfg["load_checkpoint"])
+    ckpt_path = get_checkpoint_path(
+        log_path=os.path.abspath("ckpts"),
+        run_dir=agent_cfg["load_run"],
+        checkpoint=agent_cfg["load_checkpoint"]
+    )
+
+    # --- 修复 obs_groups 缺失 & 兼容 Isaac Lab 2.1 ---
+    if "obs_groups" not in agent_cfg:
+        base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+
+        obs_manager = getattr(base_env, "observation_manager", None)
+        if obs_manager is not None:
+            if hasattr(obs_manager, "groups"):
+                obs_keys = list(obs_manager.groups.keys())
+            elif hasattr(obs_manager, "get_group_names"):
+                obs_keys = list(obs_manager.get_group_names())
+            else:
+                obs_keys = ["policy"]
+        else:
+            obs_keys = ["policy"]
+
+        agent_cfg["obs_groups"] = {"policy": obs_keys}
+
+    # 初始化强化学习 Runner
     ppo_runner = OnPolicyRunner(env, agent_cfg, log_dir=None, device=agent_cfg["device"])
     ppo_runner.load(ckpt_path)
     policy = ppo_runner.get_inference_policy(device=agent_cfg["device"])
+
     return env, policy
