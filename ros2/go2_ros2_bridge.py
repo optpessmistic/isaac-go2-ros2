@@ -259,7 +259,7 @@ class RobotDataManager(Node):
         pose_msg.pose.orientation.w = base_rot[0].item()
         self.pose_pub[env_idx].publish(pose_msg)
 
-    def publish_lidar_data(self, points, env_idx):
+    def publish_lidar_data(self, lidar_data, env_idx):
         point_cloud = PointCloud2()
         if (self.num_envs == 1):
             point_cloud.header.frame_id = "lidar_frame"
@@ -271,6 +271,83 @@ class RobotDataManager(Node):
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
         ]
+        
+        # 获取点云数据
+        raw_data = lidar_data["data"]
+        if raw_data is None or len(raw_data) == 0:
+            # 没有数据时发布空点云
+            point_cloud = point_cloud2.create_cloud(point_cloud.header, fields, np.empty((0, 3), dtype=np.float32))
+            self.lidar_pub[env_idx].publish(point_cloud)
+            return
+            
+        points = raw_data.reshape(-1, 3)
+        original_count = len(points)
+        
+        # 过滤无效点云数据
+        # RTX LiDAR在没有击中物体时会返回无效数据，表现为直线放射状点云
+        if len(points) > 0:
+            # 计算每个点的距离
+            distances = np.sqrt(points[:, 0]**2 + points[:, 1]**2 + points[:, 2]**2)
+            
+            # 过滤条件：
+            # 1. 移除距离为0或接近0的点
+            # 2. 移除距离过大的点（超出LiDAR有效范围，通常是无效返回）
+            # 3. 移除nan和inf
+            # 4. 移除距离太近的点（可能是扫描到机器人自身）
+            min_range = 0.5   # 最小有效距离，过滤机器人自身
+            max_range = 50.0  # 最大有效距离
+            
+            valid_mask = (
+                np.isfinite(distances) &      # 非nan/inf
+                (distances > min_range) &     # 距离大于最小值
+                (distances < max_range)       # 距离小于最大值
+            )
+            points = points[valid_mask]
+            
+            # 额外过滤：移除沿主轴方向的异常直线/扇形点
+            # RTX LiDAR 在没有击中物体时会沿射线方向返回点
+            # 这些异常点出现在四个主轴方向（±X, ±Y），形成垂直于XY平面的扇形
+            # 特征：在XY平面上几乎完全沿着X轴或Y轴
+            if len(points) > 0:
+                # 计算水平面上的距离
+                horizontal_dist = np.sqrt(points[:, 0]**2 + points[:, 1]**2)
+                
+                # 避免除零
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    # 计算X和Y相对于水平距离的比例
+                    x_ratio = np.abs(points[:, 0]) / horizontal_dist
+                    y_ratio = np.abs(points[:, 1]) / horizontal_dist
+                    x_ratio = np.nan_to_num(x_ratio, nan=0.0)
+                    y_ratio = np.nan_to_num(y_ratio, nan=0.0)
+                
+                # 过滤阈值：当一个方向的比例接近1时，说明点几乎完全在该轴上
+                # 比例 > 0.998 约等于偏离角 < 3.6 度
+                axis_ratio_threshold = 0.998
+                min_horizontal_dist = 0.3  # 只过滤距离大于此值的点
+                
+                # 沿X轴的异常点（正前方和正后方）：x_ratio接近1，y_ratio接近0
+                along_x_axis = (
+                    (horizontal_dist > min_horizontal_dist) &
+                    (x_ratio > axis_ratio_threshold)
+                )
+                
+                # 沿Y轴的异常点（正左和正右）：y_ratio接近1，x_ratio接近0
+                along_y_axis = (
+                    (horizontal_dist > min_horizontal_dist) &
+                    (y_ratio > axis_ratio_threshold)
+                )
+                
+                # 合并两个条件
+                axis_invalid_mask = along_x_axis | along_y_axis
+                
+                # 调试信息（可取消注释）
+                # invalid_count = np.sum(axis_invalid_mask)
+                # if invalid_count > 0:
+                #     print(f"[DEBUG] Filtered {invalid_count} axis-aligned points (X:{np.sum(along_x_axis)}, Y:{np.sum(along_y_axis)})")
+                
+                # 保留不满足无效条件的点
+                points = points[~axis_invalid_mask]
+        
         point_cloud = point_cloud2.create_cloud(point_cloud.header, fields, points)
         self.lidar_pub[env_idx].publish(point_cloud)        
 
@@ -287,7 +364,7 @@ class RobotDataManager(Node):
 
     def pub_lidar_data_callback(self):
         for i in range(self.num_envs):
-            self.publish_lidar_data(self.lidar_annotators[i].get_data()["data"].reshape(-1, 3), i)
+            self.publish_lidar_data(self.lidar_annotators[i].get_data(), i)
 
     def pub_ros2_data(self):
         pub_odom_pose = False
@@ -315,7 +392,7 @@ class RobotDataManager(Node):
             if (pub_lidar):
                 self.lidar_pub_time = time.time()
                 for i in range(self.num_envs):
-                    self.publish_lidar_data(self.lidar_annotators[i].get_data()["data"].reshape(-1, 3), i)
+                    self.publish_lidar_data(self.lidar_annotators[i].get_data(), i)
 
     def cmd_vel_callback(self, msg, env_idx):
         go2_ctrl.base_vel_cmd_input[env_idx][0] = msg.linear.x
