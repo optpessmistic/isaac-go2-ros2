@@ -26,10 +26,10 @@ class RobotDataManager(Node):
     def __init__(self, env, lidar_annotators, cameras, cfg):
         super().__init__("robot_data_manager")
         self.cfg = cfg
-        self.create_ros_time_graph()
-        sim_time_set = False
-        while (rclpy.ok() and sim_time_set==False):
-            sim_time_set = self.use_sim_time()
+        # 使用系统时间 - 不发布仿真时钟，不设置 use_sim_time
+        # 注意: 如果需要恢复仿真时间，取消下面代码的注释
+        # self.create_ros_time_graph()
+        # self.use_sim_time()
 
         self.env = env
         self.num_envs = env.unwrapped.scene.num_envs
@@ -147,8 +147,8 @@ class RobotDataManager(Node):
             base_lidar_transform = TransformStamped()
             base_lidar_transform.header.stamp = self.get_clock().now().to_msg()
             if (self.num_envs == 1):
-                base_lidar_transform.header.frame_id = "unitree_go2/base_link"
-                base_lidar_transform.child_frame_id = "unitree_go2/lidar_frame"
+                base_lidar_transform.header.frame_id = "base_link"
+                base_lidar_transform.child_frame_id = "lidar_frame"
             else:
                 base_lidar_transform.header.frame_id = f"unitree_go2_{i}/base_link"
                 base_lidar_transform.child_frame_id = f"unitree_go2_{i}/lidar_frame"
@@ -174,8 +174,8 @@ class RobotDataManager(Node):
             base_cam_transform = TransformStamped()
             # base_cam_transform.header.stamp = self.get_clock().now().to_msg()
             if (self.num_envs == 1):
-                base_cam_transform.header.frame_id = "unitree_go2/base_link"
-                base_cam_transform.child_frame_id = "unitree_go2/front_cam"
+                base_cam_transform.header.frame_id = "base_link"
+                base_cam_transform.child_frame_id = "front_cam"
             else:
                 base_cam_transform.header.frame_id = f"unitree_go2_{i}/base_link"
                 base_cam_transform.child_frame_id = f"unitree_go2_{i}/front_cam"
@@ -209,7 +209,7 @@ class RobotDataManager(Node):
     def publish_odom(self, base_pos, base_rot, base_lin_vel_b, base_ang_vel_b, env_idx):
         odom_msg = Odometry()
         odom_msg.header.stamp = self.get_clock().now().to_msg()
-        odom_msg.header.frame_id = "map"
+        odom_msg.header.frame_id = "odom"
         if (self.num_envs == 1):
             odom_msg.child_frame_id = "base_link"
         else:
@@ -232,9 +232,9 @@ class RobotDataManager(Node):
         # transform
         map_base_trans = TransformStamped()
         map_base_trans.header.stamp = self.get_clock().now().to_msg()
-        map_base_trans.header.frame_id = "map"
+        map_base_trans.header.frame_id = "odom"
         if (self.num_envs == 1):
-            map_base_trans.child_frame_id = "unitree_go2/base_link"
+            map_base_trans.child_frame_id = "base_link"
         else:
             map_base_trans.child_frame_id = f"unitree_go2_{env_idx}/base_link"
         map_base_trans.transform.translation.x = base_pos[0].item()
@@ -262,7 +262,7 @@ class RobotDataManager(Node):
     def publish_lidar_data(self, points, env_idx):
         point_cloud = PointCloud2()
         if (self.num_envs == 1):
-            point_cloud.header.frame_id = "unitree_go2/lidar_frame"
+            point_cloud.header.frame_id = "lidar_frame"
         else:
             point_cloud.header.frame_id = f"unitree_go2_{env_idx}/lidar_frame"
         point_cloud.header.stamp = self.get_clock().now().to_msg()
@@ -375,13 +375,13 @@ class RobotDataManager(Node):
                         ("ROS2CameraHelperColor.inputs:type", "rgb"),
                         ("ROS2CameraHelperColor.inputs:topicName", color_topic_name),
                         ("ROS2CameraHelperColor.inputs:frameId", frame_id),
-                        ("ROS2CameraHelperColor.inputs:useSystemTime", False),
+                        ("ROS2CameraHelperColor.inputs:useSystemTime", True),
 
                         # depth camera
                         ("ROS2CameraHelperDepth.inputs:type", "depth"),
                         ("ROS2CameraHelperDepth.inputs:topicName", depth_topic_name),
                         ("ROS2CameraHelperDepth.inputs:frameId", frame_id),
-                        ("ROS2CameraHelperDepth.inputs:useSystemTime", False),
+                        ("ROS2CameraHelperDepth.inputs:useSystemTime", True),
 
                         # semantic camera
                         # ("ROS2CameraHelperSegmentation.inputs:type", "semantic_segmentation"),
@@ -465,7 +465,7 @@ class RobotDataManager(Node):
                 frameId=frame_id,
                 nodeNamespace=node_namespace,
                 queueSize=queue_size,
-                topicName=topic_name
+                topicName=topic_name,
             )
             writer.attach([render_product])
 
@@ -499,7 +499,7 @@ class RobotDataManager(Node):
                 frameId=frame_id,
                 nodeNamespace=node_namespace,
                 queueSize=queue_size,
-                topicName=topic_name
+                topicName=topic_name,
             )
             writer.attach([render_product])
 

@@ -72,9 +72,12 @@ def run_simulator(cfg):
     
     # ROS2 Bridge
     rclpy.init()
+    print("[INFO] Creating ROS2 data manager...")
     dm = go2_ros2_bridge.RobotDataManager(env, lidar_annotators, cameras, cfg)
+    print("[INFO] ROS2 data manager created successfully!")
 
     # Run simulation
+    print("[INFO] Starting simulation loop...")
     sim_step_dt = float(go2_env_cfg.sim.dt * go2_env_cfg.decimation)
     obs, _ = env.reset()
     while simulation_app.is_running():
@@ -88,7 +91,7 @@ def run_simulator(cfg):
 
             # # ROS2 data
             dm.pub_ros2_data()
-            rclpy.spin_once(dm)
+            rclpy.spin_once(dm, timeout_sec=0)  # 非阻塞调用
 
             # Camera follow
             if (cfg.camera_follow):
